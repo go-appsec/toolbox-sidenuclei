@@ -4,6 +4,13 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # nuclei/v3 pins these transitively; independent bumps break its build
+    # (kin-openapi >= v0.144 changes Schema.ExclusiveMin and fails to compile)
+    # let the nuclei/v3 update carry them instead
+    ignore:
+      - dependency-name: "github.com/getkin/kin-openapi"
+      - dependency-name: "github.com/oasdiff/yaml"
+      - dependency-name: "github.com/oasdiff/yaml3"
 
   - package-ecosystem: "github-actions"
     directory: "/"

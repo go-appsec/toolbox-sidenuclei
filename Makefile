@@ -6,11 +6,29 @@ test test-all: .SHELLFLAGS := -o pipefail -c
 _FILTER := | grep -v "no test files"
 endif
 
-.PHONY: build clean test test-all test-cover bench fmt-changed lint
+.PHONY: build build-cross clean test test-all test-cover bench fmt-changed lint
 
 build:
 	@mkdir -p bin
 	go build -o ./bin/sidenuclei ./sidenuclei
+
+PLATFORMS := linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64 windows-arm64
+
+build-cross:
+	@mkdir -p bin
+	@for platform in $(PLATFORMS); do \
+		os=$$(echo $$platform | cut -d'-' -f1); \
+		arch=$$(echo $$platform | cut -d'-' -f2); \
+		ext=""; \
+		if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
+		echo "Building sidenuclei for $$os/$$arch..."; \
+		GOOS=$$os GOARCH=$$arch go build -o bin/sidenuclei-$$platform$$ext ./sidenuclei; \
+		if [ "$$os" = "windows" ]; then \
+			(cd bin && zip sidenuclei-$$platform.zip sidenuclei-$$platform$$ext && rm sidenuclei-$$platform$$ext); \
+		else \
+			gzip bin/sidenuclei-$$platform; \
+		fi; \
+	done
 
 clean:
 	rm -rf bin/

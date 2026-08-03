@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
-	"time"
 
+	"github.com/go-appsec/toolbox-sidenuclei/sidenuclei/nuclei"
 	"github.com/go-appsec/toolbox/sidecar"
 )
 
@@ -34,45 +35,42 @@ func main() {
 }
 
 func run(parent context.Context, cfg Config) error {
+	if err := cfg.parse(); err != nil {
+		return err
+	}
+
+	engine, err := nuclei.New(parent, cfg.engineConfig())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = engine.Close() }()
+
 	conn, err := connect(parent, cfg)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = conn.Close() }()
 
-	_ = conn.Log("info", "attached", map[string]any{"instance_id": cfg.InstanceID})
+	_ = conn.Log("info", "attached", nil)
+	if classes := cfg.enabledInjectionClasses(); len(classes) > 0 {
+		_ = conn.Log(logWarn, "active injection fuzzing enabled ("+strings.Join(classes, ",")+"): payloads are sent with captured (often authenticated) requests to "+cfg.FuzzMethods+" endpoints; ensure the target scope is authorized", nil)
+	}
 	_ = conn.ReportMetrics(map[string]int64{
 		"flows_observed":    0,
 		"endpoints_scanned": 0,
 		"findings":          0,
 	}, nil)
 
-	// OnShutdown cancels ctx to drain the pull loop; Serve stays on parent so a
-	// sectool shutdown returns via the remote close (nil), not ctx cancellation.
+	// child ctx drains the pull loop on shutdown; Serve stays on parent
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	h := &handler{cancel: cancel}
 
-	go pullLoop(ctx, conn, cfg)
+	go pullLoop(ctx, conn, cfg, engine)
 
 	err = conn.Serve(parent, h)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("serve: %w", err)
 	}
 	return nil
-}
-
-// pullLoop is the phase-1 stub: it just ticks and honors ctx.Done().
-func pullLoop(ctx context.Context, conn *sidecar.Conn, cfg Config) {
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			// phase-2: proxy_poll cursor loop goes here
-		}
-	}
 }

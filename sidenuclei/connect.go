@@ -17,19 +17,14 @@ func connect(ctx context.Context, cfg Config) (*sidecar.Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 
-	reg := sidecar.Registration{
-		Name:       "nuclei-scanner",
-		Protocols:  nil, // observes only; originates nothing
-		InstanceID: cfg.InstanceID,
-	}
-
-	conn, err := sidecar.Dial(ctx, cfg.Socket, reg)
+	conn, err := sidecar.Dial(ctx, cfg.Socket, sidecar.Registration{
+		Name:      "nuclei-scanner",
+		Protocols: nil, // observes only; originates nothing
+	})
 	if errors.Is(err, sidecar.ErrVersionUnsupported) {
 		return nil, errors.New("protocol version unsupported - rebuild against the running sectool")
-	}
-	if err != nil {
+	} else if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
-
 	return conn, nil
 }
