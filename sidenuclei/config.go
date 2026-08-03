@@ -73,7 +73,7 @@ func defaultConfig() Config {
 		Source:             "proxy",
 		PollInterval:       "10s",
 		PollLimit:          200,
-		MaxConcurrentScans: 1,
+		MaxConcurrentScans: 10,
 
 		CVE:       true,
 		Exposures: true,
@@ -88,8 +88,8 @@ func defaultConfig() Config {
 
 		OASTServers: nuclei.DefaultOASTServers,
 
-		RateLimit:          10,
-		Concurrency:        25,
+		RateLimit:          20,
+		Concurrency:        40,
 		ScanTimeout:        "20m",
 		MaxRawRequestBytes: 262144,
 	}
