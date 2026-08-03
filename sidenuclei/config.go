@@ -228,18 +228,44 @@ func (c *Config) fuzzEnabled() bool { return len(tagsOf(c.fuzzCategories())) > 0
 // enabledInjectionClasses returns the names of the opt-in active-injection classes
 // that are enabled, for the startup safety warning.
 func (c *Config) enabledInjectionClasses() []string {
-	classes := []struct {
-		on   bool
-		name string
-	}{
+	return onNames([]namedToggle{
 		{c.SQLi, "sqli"}, {c.XSS, "xss"}, {c.CMDi, "cmdi"},
 		{c.SSTI, "ssti"}, {c.XXE, "xxe"}, {c.CRLF, "crlf"},
 		{c.CVEInjection, "cve-injection"},
-	}
+	})
+}
+
+// enabledDetectionNames returns the names of the enabled detection categories,
+// for the status tool's coverage description.
+func (c *Config) enabledDetectionNames() []string {
+	return onNames([]namedToggle{
+		{c.CVE, "cve"}, {c.Exposures, "exposures"}, {c.Misconfig, "misconfig"},
+		{c.Tech, "tech"}, {c.CVEInjection, "cve-injection"},
+	})
+}
+
+// enabledFuzzNames returns the names of the enabled fuzzing categories, for the
+// status tool's coverage description.
+func (c *Config) enabledFuzzNames() []string {
+	return onNames([]namedToggle{
+		{c.SSRF, "ssrf"}, {c.Redirect, "redirect"}, {c.SQLi, "sqli"},
+		{c.XSS, "xss"}, {c.CMDi, "cmdi"}, {c.SSTI, "ssti"},
+		{c.XXE, "xxe"}, {c.CRLF, "crlf"},
+	})
+}
+
+// namedToggle pairs a coverage bool with its display name.
+type namedToggle struct {
+	on   bool
+	name string
+}
+
+// onNames returns the names of the toggles that are on, in declared order.
+func onNames(toggles []namedToggle) []string {
 	var out []string
-	for _, cl := range classes {
-		if cl.on {
-			out = append(out, cl.name)
+	for _, t := range toggles {
+		if t.on {
+			out = append(out, t.name)
 		}
 	}
 	return out

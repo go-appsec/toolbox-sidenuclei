@@ -53,6 +53,7 @@ type scanner struct {
 	scanned          map[string]struct{}
 	flowsObserved    atomic.Int64 // running total of selected flows, reported each tick
 	endpointsScanned atomic.Int64 // completed scan runs
+	inFlight         atomic.Int64 // scans currently executing
 	findings         atomic.Int64 // finding notes filed
 	skipped          atomic.Int64 // endpoints dropped as unscannable
 	mu               sync.Mutex   // guards queue + closed
@@ -77,22 +78,16 @@ func newScanner(cfg Config, invoke CoreInvoker, engine scanEngine) *scanner {
 		engine:  engine,
 	}
 	s.cond = sync.NewCond(&s.mu)
-	s.logf = func(string, string, map[string]any) {} // default no-op; pullLoop installs conn-backed logger
+	s.logf = func(string, string, map[string]any) {} // default no-op; run installs the conn-backed logger
 	return s
 }
 
 // pullLoop is the proxy_poll cursor loop. It observes every flow after the cursor
 // exactly once, filters replay and duplicate flows, and hands each unique in-scope
-// endpoint to the scan worker pool.
-func pullLoop(ctx context.Context, conn *sidecar.Conn, cfg Config, engine scanEngine) {
-	invoke := func(ctx context.Context, tool string, params any) (wire.CoreInvokeResult, error) {
-		return conn.CoreInvoke(ctx, tool, params)
-	}
-	s := newScanner(cfg, invoke, engine)
-	s.logf = func(level, message string, fields map[string]any) {
-		_ = conn.Log(level, message, fields)
-	}
-
+// endpoint to the scan worker pool. The scanner is shared with the status tool
+// handler, so it is constructed by the caller.
+func pullLoop(ctx context.Context, conn *sidecar.Conn, s *scanner) {
+	cfg := s.cfg
 	s.startWorkers(ctx, cfg.MaxConcurrentScans)
 	defer s.closeQueue() // stop workers once the loop exits (on shutdown)
 
@@ -246,6 +241,13 @@ func (s *scanner) enqueue(j scanJob) {
 	s.queue = append(s.queue, j)
 	s.mu.Unlock()
 	s.cond.Signal()
+}
+
+// queueDepth returns the number of built jobs waiting for a worker.
+func (s *scanner) queueDepth() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.queue)
 }
 
 // dequeue returns the next job, waiting when empty. Returns false once the queue is

@@ -11,12 +11,15 @@ import (
 
 	"github.com/go-appsec/toolbox-sidenuclei/sidenuclei/nuclei"
 	"github.com/go-appsec/toolbox/sidecar"
+	"github.com/go-appsec/toolbox/sidecar/wire"
 )
 
 // handler embeds BaseHandler and wires OnShutdown to cancel the pull loop context.
+// It holds the shared scanner so OnInvokeTool can serve live status.
 type handler struct {
 	sidecar.BaseHandler
 	cancel context.CancelFunc
+	s      *scanner
 }
 
 func (h *handler) OnShutdown(drainSeconds int) {
@@ -64,9 +67,18 @@ func run(parent context.Context, cfg Config) error {
 	// child ctx drains the pull loop on shutdown; Serve stays on parent
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
-	h := &handler{cancel: cancel}
 
-	go pullLoop(ctx, conn, cfg, engine)
+	// scanner is shared between the pull loop and the status tool handler
+	invoke := func(ctx context.Context, tool string, params any) (wire.CoreInvokeResult, error) {
+		return conn.CoreInvoke(ctx, tool, params)
+	}
+	s := newScanner(cfg, invoke, engine)
+	s.logf = func(level, message string, fields map[string]any) {
+		_ = conn.Log(level, message, fields)
+	}
+	h := &handler{cancel: cancel, s: s}
+
+	go pullLoop(ctx, conn, s)
 
 	err = conn.Serve(parent, h)
 	if err != nil && !errors.Is(err, context.Canceled) {

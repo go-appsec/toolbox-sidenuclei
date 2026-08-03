@@ -98,6 +98,27 @@ func TestEnabledInjectionClasses(t *testing.T) {
 	assert.Equal(t, []string{"sqli", "xxe"}, cfg.enabledInjectionClasses())
 }
 
+func TestEnabledDetectionNames(t *testing.T) {
+	t.Parallel()
+
+	cfg := defaultConfig()
+	assert.Equal(t, []string{"cve", "exposures", "misconfig", "tech"}, cfg.enabledDetectionNames())
+
+	cfg.Exposures, cfg.Tech = false, false
+	cfg.CVEInjection = true
+	assert.Equal(t, []string{"cve", "misconfig", "cve-injection"}, cfg.enabledDetectionNames())
+}
+
+func TestEnabledFuzzNames(t *testing.T) {
+	t.Parallel()
+
+	cfg := defaultConfig()
+	assert.Equal(t, []string{"ssrf", "redirect"}, cfg.enabledFuzzNames())
+
+	cfg.XSS, cfg.CRLF = true, true
+	assert.Equal(t, []string{"ssrf", "redirect", "xss", "crlf"}, cfg.enabledFuzzNames())
+}
+
 func TestSplitCSV(t *testing.T) {
 	t.Parallel()
 

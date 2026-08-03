@@ -44,6 +44,8 @@ func (s *scanner) runScan(parent context.Context, j scanJob) {
 	scanCtx, cancel := context.WithTimeout(parent, s.cfg.scanTimeout)
 	defer cancel()
 
+	s.inFlight.Add(1)
+	defer s.inFlight.Add(-1)
 	s.endpointsScanned.Add(1)
 
 	// file under parent, not scanCtx: a scan-deadline hit must not cancel notes_save

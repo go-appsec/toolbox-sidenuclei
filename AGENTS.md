@@ -18,10 +18,11 @@ Two packages:
 
 ### Data flow (the core loop)
 
-1. **`connect.go`** dials sectool and registers as an observer (originates nothing).
+1. **`connect.go`** dials sectool and registers as an observer (originates nothing), declaring MCP tools specific to nuclei.
 2. **`poll.go` `pullLoop`** is a `proxy_poll` cursor loop. Each tick it advances a `flow_id` cursor over new flows, drops replay traffic and already-seen endpoints (`skip` / `endpointKey`, which dedups on method+host+port+path with query *values* stripped but *parameter names* kept), builds each unique flow's scan target (`flow_get` + `BuildImportTarget`, so the body is captured before sectool can evict the flow), and `enqueue`s it onto an unbounded in-memory queue that the workers drain. The poll loop never blocks on scan throughput. Backoff is driven by `remaining_count` — drain immediately when flows remain, else `--poll-interval`.
 3. **`scan.go`** worker pool pulls built targets off the queue (`dequeue`) and runs the engine under a per-endpoint timeout (`--scan-timeout`). Findings are filed under the *parent* context, not the scan context, so a scan deadline never cancels `notes_save`.
 4. **`notes.go`** renders each finding into a greppable note body and files it via `notes_save`, linked to the originating `flow_id`. Deduped per (template, matched-at). Warns once if sectool was started without `--notes`.
+5. **`status.go`** serves the `nuclei_status` MCP tool via `handler.OnInvokeTool`, projecting the shared `scanner`'s live counters (activity, queue depth, findings filed) and enabled coverage into structured output. Read-only; findings themselves stay in notes. The `scanner` is built in `main.run` and shared with the poll loop so both see one source of truth.
 
 ### Nuclei engine (`nuclei/`)
 
@@ -31,7 +32,7 @@ Two packages:
 
 ### Config (`config.go`)
 
-Coverage is a set of **categories** (`category{on, tags}`), not directly-set engines. Detection categories (CVE/exposures/misconfig/tech) are on by default with `--disable-*` flags; injection fuzzing classes (sqli/xss/cmdi/...) are opt-in. `engineConfig()` projects enabled categories → nuclei tag filters. When adding a coverage flag, wire it through `detectCategories()`/`fuzzCategories()` and (for active-injection classes) `enabledInjectionClasses()` so the startup safety warning stays accurate.
+Coverage is a set of **categories** (`category{on, tags}`), not directly-set engines. Detection categories (CVE/exposures/misconfig/tech) are on by default with `--disable-*` flags; injection fuzzing classes (sqli/xss/cmdi/...) are opt-in. `engineConfig()` projects enabled categories → nuclei tag filters. When adding a coverage flag, wire it through `detectCategories()`/`fuzzCategories()`, the `enabledDetectionNames()`/`enabledFuzzNames()` helpers (so `nuclei_status` coverage stays accurate), and (for active-injection classes) `enabledInjectionClasses()` so the startup safety warning stays accurate.
 
 ## Code Style
 
