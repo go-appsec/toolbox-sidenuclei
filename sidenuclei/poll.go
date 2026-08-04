@@ -88,8 +88,8 @@ func newScanner(cfg Config, invoke CoreInvoker, engine scanEngine) *scanner {
 // handler, so it is constructed by the caller.
 func pullLoop(ctx context.Context, conn *sidecar.Conn, s *scanner) {
 	cfg := s.cfg
-	s.startWorkers(ctx, cfg.MaxConcurrentScans)
-	defer s.closeQueue() // stop workers once the loop exits (on shutdown)
+	s.startWorkers(ctx, cfg.MaxConcurrentScans) // ctx cancellation stops in-progress scans
+	defer s.closeQueue()                        // stop workers once the loop exits (on shutdown)
 
 	var cursor string // empty = from the beginning; never "last"
 	if cfg.FromNow {

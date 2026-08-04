@@ -54,6 +54,7 @@ type Engine struct {
 	fuzz   *passEngine
 	dir    string
 	seq    atomic.Uint64
+	once   sync.Once // guards Close against concurrent or repeated invocation
 }
 
 // New provisions templates, then constructs the enabled scan passes. Returns an
@@ -123,15 +124,20 @@ func (e *Engine) runPass(ctx context.Context, pe *passEngine, targets []ImportTa
 	return pe.scan(ctx, path, cb)
 }
 
-// Close shuts down both engines and removes the temp dir.
+// Close shuts down both engines and removes the temp dir. Idempotent: safe to call
+// again or concurrently (e.g. from OnShutdown and deferred run cleanup).
 func (e *Engine) Close() error {
-	if e.detect != nil {
-		e.detect.e.Close()
-	}
-	if e.fuzz != nil {
-		e.fuzz.e.Close()
-	}
-	return os.RemoveAll(e.dir)
+	var err error
+	e.once.Do(func() {
+		if e.detect != nil {
+			e.detect.e.Close()
+		}
+		if e.fuzz != nil {
+			e.fuzz.e.Close()
+		}
+		err = os.RemoveAll(e.dir)
+	})
+	return err
 }
 
 // proxifyDoc is one jsonl import document; nuclei consumes only url + request.raw.

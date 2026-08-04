@@ -33,7 +33,7 @@ func (s *scanner) startWorkers(ctx context.Context, n int) {
 				if !ok {
 					return
 				}
-				s.runScan(ctx, j)
+				s.runScan(ctx, j) // ctx cancellation stops in-progress scans on shutdown
 			}
 		}()
 	}
