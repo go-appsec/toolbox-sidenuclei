@@ -3,7 +3,7 @@ module github.com/go-appsec/toolbox-sidenuclei
 go 1.26.5
 
 require (
-	github.com/go-analyze/bulk v0.1.4
+	github.com/go-analyze/bulk v0.1.5
 	github.com/go-appsec/toolbox v0.2.2
 	github.com/projectdiscovery/interactsh v1.3.1
 	github.com/projectdiscovery/nuclei/v3 v3.11.0
