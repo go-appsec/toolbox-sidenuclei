@@ -103,9 +103,9 @@ func (s *scanner) saveFinding(ctx context.Context, flowID string, f nuclei.Findi
 	if s.alreadyFiled(f) {
 		return
 	}
-	res, err := s.invoke(ctx, "notes_save", noteParams(flowID, f))
+	res, err := s.coreInvoke(ctx, "notes_save", noteParams(flowID, f))
 	if err != nil {
-		s.logf(logWarn, "save finding failed", map[string]any{
+		s.log(logWarn, "save finding failed", map[string]any{
 			flowIDField: flowID,
 			errField:    err.Error(),
 		})
@@ -113,7 +113,7 @@ func (s *scanner) saveFinding(ctx context.Context, flowID string, f nuclei.Findi
 	}
 	if res.IsError {
 		if s.notesWarned.CompareAndSwap(false, true) {
-			s.logf(logWarn, "notes_save unavailable - sectool running without --notes; findings not filed",
+			s.log(logWarn, "notes_save unavailable - sectool running without --notes; findings not filed",
 				map[string]any{flowIDField: flowID})
 		}
 		return

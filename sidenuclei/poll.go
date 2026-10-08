@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -63,8 +64,9 @@ type scanner struct {
 	notesWarned      atomic.Bool  // one-time warn when sectool lacks --notes
 	filedMu          sync.Mutex   // guards filed
 	filed            map[string]struct{}
-	invoke           CoreInvoker
 	engine           scanEngine
+	seamsMu          sync.RWMutex // guards invoke + logf across reconnects
+	invoke           CoreInvoker
 	logf             func(level, message string, fields map[string]any)
 	lastActivity     int64 // observed+skipped at the last metrics report (poll goroutine only)
 }
@@ -78,8 +80,38 @@ func newScanner(cfg Config, invoke CoreInvoker, engine scanEngine) *scanner {
 		engine:  engine,
 	}
 	s.cond = sync.NewCond(&s.mu)
-	s.logf = func(string, string, map[string]any) {} // default no-op; run installs the conn-backed logger
+	s.logf = func(string, string, map[string]any) {} // default no-op; serveSession rebinds the conn-backed logger
 	return s
+}
+
+// rebind repoints the conn-backed invoke and log seams at a fresh session. A dropped
+// session's poll loop and workers may still be winding down, so access is locked.
+func (s *scanner) rebind(invoke CoreInvoker, logf func(level, message string, fields map[string]any)) {
+	s.seamsMu.Lock()
+	s.invoke = invoke
+	s.logf = logf
+	s.seamsMu.Unlock()
+}
+
+// coreInvoke runs tool over the current session's conn.
+func (s *scanner) coreInvoke(ctx context.Context, tool string, params any) (wire.CoreInvokeResult, error) {
+	s.seamsMu.RLock()
+	fn := s.invoke
+	s.seamsMu.RUnlock()
+	if fn == nil {
+		return wire.CoreInvokeResult{}, errors.New("scanner: no conn bound")
+	}
+	return fn(ctx, tool, params)
+}
+
+// log emits a sidecar log over the current session's conn.
+func (s *scanner) log(level, message string, fields map[string]any) {
+	s.seamsMu.RLock()
+	fn := s.logf
+	s.seamsMu.RUnlock()
+	if fn != nil {
+		fn(level, message, fields)
+	}
 }
 
 // pullLoop is the proxy_poll cursor loop. It observes every flow after the cursor
@@ -88,6 +120,7 @@ func newScanner(cfg Config, invoke CoreInvoker, engine scanEngine) *scanner {
 // handler, so it is constructed by the caller.
 func pullLoop(ctx context.Context, conn *sidecar.Conn, s *scanner) {
 	cfg := s.cfg
+	s.resetQueue()                              // fresh session: reopen the queue, dropping a dropped session's stale jobs
 	s.startWorkers(ctx, cfg.MaxConcurrentScans) // ctx cancellation stops in-progress scans
 	defer s.closeQueue()                        // stop workers once the loop exits (on shutdown)
 
@@ -128,7 +161,7 @@ func pullLoop(ctx context.Context, conn *sidecar.Conn, s *scanner) {
 
 		if selected > 0 {
 			s.flowsObserved.Add(int64(selected))
-			s.logf(logInfo, "poll tick", map[string]any{
+			s.log(logInfo, "poll tick", map[string]any{
 				"flows_selected": selected,
 				"cursor":         cursor,
 			})
@@ -160,7 +193,7 @@ func (s *scanner) poll(ctx context.Context, cursor string) (proxyPoll, bool) {
 		"limit":       s.cfg.PollLimit,
 	}
 
-	res, err := s.invoke(ctx, "proxy_poll", args)
+	res, err := s.coreInvoke(ctx, "proxy_poll", args)
 	if err != nil || res.IsError {
 		return proxyPoll{}, false
 	}
@@ -251,11 +284,14 @@ func (s *scanner) queueDepth() int {
 }
 
 // dequeue returns the next job, waiting when empty. Returns false once the queue is
-// closed and drained.
-func (s *scanner) dequeue() (scanJob, bool) {
+// closed and drained or ctx is done (session end).
+func (s *scanner) dequeue(ctx context.Context) (scanJob, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for len(s.queue) == 0 && !s.closed {
+		if ctx.Err() != nil {
+			return scanJob{}, false
+		}
 		s.cond.Wait()
 	}
 	if len(s.queue) == 0 {
@@ -270,6 +306,17 @@ func (s *scanner) dequeue() (scanJob, bool) {
 func (s *scanner) closeQueue() {
 	s.mu.Lock()
 	s.closed = true
+	s.mu.Unlock()
+	s.cond.Broadcast()
+}
+
+// resetQueue reopens the queue for a new session, dropping jobs left by a dropped
+// session (their scan ctx is cancelled, so they would only fail). The broadcast
+// releases the previous session's parked workers, which then exit on their dead ctx.
+func (s *scanner) resetQueue() {
+	s.mu.Lock()
+	s.closed = false
+	s.queue = nil
 	s.mu.Unlock()
 	s.cond.Broadcast()
 }

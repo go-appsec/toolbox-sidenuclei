@@ -18,7 +18,7 @@ Two packages:
 
 ### Data flow (the core loop)
 
-1. **`connect.go`** dials sectool and registers as an observer (originates nothing), declaring MCP tools specific to nuclei.
+1. **`connect.go`** dials sectool and registers as an observer (originates nothing), declaring MCP tools specific to nuclei. **`main.go` `serveForever`** owns the session lifecycle: it dials, serves, and reconnects with exponential backoff when the transport drops (sectool restart or shutdown). A failed first dial is fatal; past `reconnectWindow` without a healthy session the process exits nonzero so a supervisor can intervene. The engines and the `scanner` are process-global, so warm engines and dedup state survive reconnects; each session rebinds the scanner's conn-backed seams (`rebind`), and a served session past `reconnectStable` resets the backoff.
 2. **`poll.go` `pullLoop`** is a `proxy_poll` cursor loop. Each tick it advances a `flow_id` cursor over new flows, drops replay traffic and already-seen endpoints (`skip` / `endpointKey`, which dedups on method+host+port+path with query *values* stripped but *parameter names* kept), builds each unique flow's scan target (`flow_get` + `BuildImportTarget`, so the body is captured before sectool can evict the flow), and `enqueue`s it onto an unbounded in-memory queue that the workers drain. The poll loop never blocks on scan throughput. Backoff is driven by `remaining_count` — drain immediately when flows remain, else `--poll-interval`.
 3. **`scan.go`** worker pool pulls built targets off the queue (`dequeue`) and runs the engine under a per-endpoint timeout (`--scan-timeout`). Findings are filed under the *parent* context, not the scan context, so a scan deadline never cancels `notes_save`.
 4. **`notes.go`** renders each finding into a greppable note body and files it via `notes_save`, linked to the originating `flow_id`. Deduped per (template, matched-at). Warns once if sectool was started without `--notes`.
@@ -73,3 +73,4 @@ Testing seams:
 
 - `CoreInvoker` (`poll.go`) abstracts `(*sidecar.Conn).CoreInvoke` so tests feed canned `proxy_poll`/`flow_get`/`notes_save` responses with no live sectool.
 - `scanEngine` (`scan.go`) abstracts the nuclei engine so scan-loop tests use a fake.
+- `main_test.go` hosts a real sidecar host (`scsidecar.NewListener` + no-op backends) on a temp socket so `serveForever` tests drive a drop/reconnect/outage for real.
